@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.write("Hello World")
+st.write("Hello WOrld")
 st.title("AI piano accompaniment")
 st.subheader("HI")
 
@@ -18,7 +18,6 @@ client = OpenAI(
     api_key=st.secrets.OpenAI_key
 )
 
-
 prompt=st.text_input("what do you want to ask?")
 def search_word_information(word):
     prompt = word
@@ -34,6 +33,10 @@ def search_word_information(word):
     )
     generated_text = response.choices[0].text
     return generated_text
+
 if len(prompt)>5:
     st.text(search_word_information(prompt))
+
+
+
 
