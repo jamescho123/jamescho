@@ -1,8 +1,5 @@
 import streamlit as st
-from langchain_openai import ChatOpenAI
-from dotenv import load_dotenv
 
-load_dotenv()
 st.write("Hello World")
 st.title("AI piano accompaniment")
 st.subheader("HI")
