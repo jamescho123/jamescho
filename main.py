@@ -1,16 +1,9 @@
 import streamlit as st
-import verovio
-import os
-
-# Initialize the Verovio toolkit
-vrvToolkit = verovio.toolkit()
 
 st.title("Chordsync.AI")
 st.subheader("welcome to a free piano accompaniment website")
 st.write("Uploading Files")
 st.markdown("---")
-
-st.slider("This is a slider")
 
 import os
 from openai import OpenAI
@@ -26,6 +19,17 @@ import openai
 import subprocess
 import os
 
+us = m21.environment.UserSettings()
+us_path = us.getSettingsPath()
+if not os.path.exists(us_path):
+    us.create()
+print('Path to music21 environment', us_path)
+print(us)
+
+us['lilypondPath'] = r'C:\Users\hp\Desktop\bin\lilypond.exe'
+# Rest of your Streamlit code
+
+
 # Initialize OpenAI client with API key from Streamlit secrets
 client = openai.OpenAI(
     api_key=st.secrets.OpenAI_key
@@ -33,7 +37,7 @@ client = openai.OpenAI(
 
 # Allow users to upload multiple files
 uploaded_files = st.file_uploader("Upload files", accept_multiple_files=True)
-
+options=[""]
 if uploaded_files:
     # Extract file names
     options = [uploaded_file.name for uploaded_file in uploaded_files]
@@ -61,7 +65,7 @@ if uploaded_files:
                 st.write("Audio or MIDI file accepted.")
                 audio=selected_file_data
             else:
-                st.write("Please upload an audio or MIDI file")
+                st.write("please upload an audio or MIDI file")
                 audio = st.file_uploader("Please upload an audio or MIDI file", type=["WAV", "MP3", "MP4", "MID"])
         except UnicodeDecodeError:
             st.write("Error processing the selected file.")
@@ -70,10 +74,10 @@ else:
 
 def create_accompaniment(musicxml_content):
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": f"Create an accompaniment for the following melody in MusicXML format, do not say anything before our after the MusicXML you provide:\n\n{musicxml_content}"}
+            {"role": "user", "content": f"Create an accompaniment for the following melody in MusicXML format with measures, please do not say anything before or after the MusicXML you provided, it is important that you only provide the musicxml required and nothing else (don't add '''xml):\n\n{musicxml_content}"}
         ],
         temperature=0.7,
         max_tokens=1500  # Adjust token limit as needed
@@ -81,7 +85,7 @@ def create_accompaniment(musicxml_content):
     return response.choices[0].message.content.strip()
 
 
-
+audio = st.file_uploader("Please upload an audio or MIDI file", type=["WAV", "MP3", "MP4", "MID"])
 
 if audio is not None:
     # Display audio player
@@ -157,4 +161,21 @@ with open(midi_output_path, 'rb') as file:
         file_name=midi_output_path,
         mime='audio/midi'
     )
-st.audio(midi_output_path)
+score = m21.converter.parse(midi_output_path)
+st.write("MIDI file has been processed.")
+st.write(midi_output_path)
+st.audio(midi_output_path, format="audio/mid")
+# Convert MusicXML to MIDI
+mp3_output_path = midi_output_path.replace('.mid', '.wav').replace('.mid', '.wav')
+score.write('midi', fp=mp3_output_path)
+st.write(f"Converted MIDI to mp3: {mp3_output_path}")
+
+with open(mp3_output_path, 'rb') as file:
+    btn = st.download_button(
+        label="Download mp3",
+        data=file,
+        file_name=mp3_output_path,
+        mime='audio/wav'
+    )
+st.write(mp3_output_path)
+st.audio(mp3_output_path, format="audio/wav")
