@@ -31,6 +31,43 @@ client = openai.OpenAI(
     api_key=st.secrets.OpenAI_key
 )
 
+# Allow users to upload multiple files
+uploaded_files = st.file_uploader("Upload files", accept_multiple_files=True)
+
+if uploaded_files:
+    # Extract file names
+    options = [uploaded_file.name for uploaded_file in uploaded_files]
+
+    # Create the selectbox with the file names as options
+    selected_file = st.selectbox(
+        'Select a file:',
+        options,
+        help='Choose a file from the dropdown menu'  # Tooltip
+    )
+
+    # Find the selected file in the uploaded files
+    selected_file_data = next(file for file in uploaded_files if file.name == selected_file)
+
+    # Display the selected file name
+    st.write('You selected:', selected_file)
+
+    # Simulate re-uploading the selected file for audio or MIDI file upload
+    if selected_file_data:
+        st.write("Proceed with the selected file as an audio or MIDI file:")
+        # Display the content or handle as needed
+        try:
+            if selected_file.lower().endswith(('wav', 'mp3', 'mp4', 'mid')):
+                st.audio(selected_file_data)
+                st.write("Audio or MIDI file accepted.")
+                audio=selected_file_data
+            else:
+                st.write("Please upload an audio or MIDI file")
+                audio = st.file_uploader("Please upload an audio or MIDI file", type=["WAV", "MP3", "MP4", "MID"])
+        except UnicodeDecodeError:
+            st.write("Error processing the selected file.")
+else:
+    st.write("No files uploaded yet.")
+
 def create_accompaniment(musicxml_content):
     response = client.chat.completions.create(
         model="gpt-4",
@@ -43,22 +80,9 @@ def create_accompaniment(musicxml_content):
     )
     return response.choices[0].message.content.strip()
 
-audio = st.file_uploader("Please upload an audio or MIDI file", type=["WAV", "MP3", "MP4", "MID"])
 
 
-options = ['Option 1', 'Option 2', 'Option 3']
 
-# Create the selectbox with a default value
-selected_option = st.selectbox(
-    'Select an option:',
-    options,
-    index=1,  # Default value is 'Option 2'
-    help='Choose an option from the dropdown menu'  # Tooltip
-)
-hi="Option 1"
-
-# Display the selected option
-st.write('You selected:', selected_option)
 if audio is not None:
     # Display audio player
     st.audio(audio)
