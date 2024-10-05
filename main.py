@@ -1,6 +1,4 @@
 import streamlit as st
-
-
 import librosa
 import pretty_midi
 import numpy as np
@@ -24,65 +22,83 @@ import openai
 import subprocess
 import os
 
-us = m21.environment.UserSettings()
-us_path = us.getSettingsPath()
-if not os.path.exists(us_path):
-    us.create()
-print('Path to music21 environment', us_path)
-print(us)
-
-us['lilypondPath'] = r'C:\Users\hp\Desktop\bin\lilypond.exe'
-# Rest of your Streamlit code
-
-
 # Initialize OpenAI client with API key from Streamlit secrets
 client = openai.OpenAI(
     api_key=st.secrets.OpenAI_key
 )
 
 # Allow users to upload multiple files
-uploaded_files = st.file_uploader("Upload files", accept_multiple_files=True)
-options=[""]
+import os
+
+# Define a directory to store uploaded files
+UPLOAD_DIR = "uploaded_files"
+
+# Create the directory if it doesn't exist
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+
+# Get list of files in the upload directory
+existing_files = os.listdir(UPLOAD_DIR)
+
+# Allow users to upload new files
+uploaded_files = st.file_uploader("Upload new files", accept_multiple_files=True)
+
+# Save newly uploaded files
 if uploaded_files:
-    # Extract file names
-    options = [uploaded_file.name for uploaded_file in uploaded_files]
+    for uploaded_file in uploaded_files:
+        file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        if uploaded_file.name not in existing_files:
+            existing_files.append(uploaded_file.name)
 
-    # Create the selectbox with the file names as options
-    selected_file = st.selectbox(
-        'Select a file:',
-        options,
-        help='Choose a file from the dropdown menu'  # Tooltip
-    )
+# Create options list from existing files
+options = [""] + existing_files
 
-    # Find the selected file in the uploaded files
-    selected_file_data = next(file for file in uploaded_files if file.name == selected_file)
+# Create the selectbox with file names as options
+selected_file = st.selectbox(
+    'Select a file:',
+    options,
+    help='Choose a file from the dropdown menu'
+)
 
+if selected_file:
     # Display the selected file name
     st.write('You selected:', selected_file)
 
-    # Simulate re-uploading the selected file for audio or MIDI file upload
-    if selected_file_data:
+    # Process the selected file
+    file_path = os.path.join(UPLOAD_DIR, selected_file)
+    if os.path.exists(file_path):
         st.write("Proceed with the selected file as an audio or MIDI file:")
-        # Display the content or handle as needed
         try:
             if selected_file.lower().endswith(('wav', 'mp3', 'mp4', 'mid')):
-                st.audio(selected_file_data, format="audio/mpeg")
+                st.audio(file_path, format="audio/mpeg")
                 st.write("Audio or MIDI file accepted.")
-                audio=selected_file_data
+                with open(file_path, "rb") as file:
+                    audio = file.read()
             else:
-                st.write("please upload an audio or MIDI file")
-                audio = st.file_uploader("Please upload an audio or MIDI file", type=["WAV", "MP3", "MP4", "MID"])
-        except UnicodeDecodeError:
-            st.write("Error processing the selected file.")
+                st.write("Please select an audio or MIDI file")
+        except Exception as e:
+            st.write(f"Error processing the selected file: {str(e)}")
 else:
-    st.write("No files uploaded yet.")
+    st.write("No file selected.")
 
 def create_accompaniment(musicxml_content):
+    """
+    Create an accompaniment for a given melody in MusicXML format using OpenAI's GPT model.
+
+    Args:
+        musicxml_content (str): The MusicXML content of the melody.
+
+    Returns:
+        str: The generated accompaniment in MusicXML format.
+    """
+    
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": f"Create an accompaniment for the following melody in MusicXML format with measures, please do not say anything before or after the MusicXML you provided, it is important that you only provide the musicxml required and nothing else (don't add '''xml):\n\n{musicxml_content}"}
+            {"role": "user", "content": f"Create an accompaniment in {style} style for the following melody in MusicXML format. Provide only the complete MusicXML content and also part and measures in this format ""!--========================= Measure  ==========================-->, without any additional text, comments, or markup. Do not include XML tags or any other formatting such as '''. and end with </score-partwise>, The response should be ready to be parsed as valid MusicXML:\n\n{musicxml_content}"}
         ],
         temperature=0.7,
         max_tokens=1500  # Adjust token limit as needed
@@ -97,19 +113,24 @@ import librosa
 import pretty_midi
 import numpy as np
 from io import BytesIO
+import fluidsynth
 
-# Assume create_accompaniment is defined elsewhere
-def create_accompaniment(musicxml_content):
-    # Placeholder implementation
-    return musicxml_content  # Replace with actual accompaniment creation logic
 
 # Function to convert WAV to MIDI using librosa and pretty_midi
 def wav_to_midi_librosa(wav_file):
+    """
+    Convert a WAV file to MIDI using librosa and pretty_midi.
+
+    Args:
+        wav_file (file-like object): The WAV file to be converted.
+
+    Returns:
+        BytesIO: A BytesIO object containing the converted MIDI data.
+    """
     # Load the WAV file using librosa
     y, sr = librosa.load(wav_file, sr=None)
 
-    # Extract pitches and magnitudes using librosa's piptrack
-    pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+    # Extract pitches and magnitudes using librosa's piptrack    pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
 
     # Create a PrettyMIDI object
     midi = pretty_midi.PrettyMIDI()
@@ -152,6 +173,15 @@ def wav_to_midi_librosa(wav_file):
 
 # Function to process a MIDI file: convert to MusicXML and create accompaniment
 def process_midi_file(midi_file_path):
+    """
+    Process a MIDI file by converting it to MusicXML and creating an accompaniment.
+
+    Args:
+        midi_file_path (str): The file path of the MIDI file to be processed.
+
+    Returns:
+        str: The file path of the generated accompaniment MusicXML file, or None if an error occurs.
+    """
     try:
         # Convert MIDI to MusicXML
         score = m21.converter.parse(midi_file_path)
@@ -200,7 +230,9 @@ def process_midi_file(midi_file_path):
 
 # Main logic for file upload and processing
 audio = st.file_uploader("Please upload a MIDI or WAV file", type=["WAV", "MID"])
-
+style = st.text_input("Write the style of the accompaniment")
+if style:
+    st.write(f"Selected style: {style}")
 if audio is not None:
     st.audio(audio)
     st.write(f"Uploaded file: {audio.name}")
@@ -234,119 +266,104 @@ if audio is not None:
         # Process the generated MIDI file
         existing_file_path = process_midi_file(midi_output_path)
 
-    # Display the existing file path
+    # Display the existing file path and process further
     if existing_file_path:
         st.write(f"Using existing file: {existing_file_path}")
-else:
-    st.info("Please upload a file to proceed.")
 
+        # Process the MusicXML file
+        score = m21.converter.parse(existing_file_path)
+        st.write("MusicXML file has been processed.")
 
+        # Convert MusicXML to MIDI
+        midi_output_path = existing_file_path.replace('.musicxml', '.mid').replace('.xml', '.mid')
+        score.write('midi', fp=midi_output_path)
+        st.write(f"Converted MusicXML to MIDI: {midi_output_path}")
 
-# Display the provided Mu   sicXML file path
-st.write(f"Using existing file: {existing_file_path}")
-
-# Process the MusicXML file
-score = m21.converter.parse(existing_file_path)
-st.write("MusicXML file has been processed.")
-
-# Convert MusicXML to MIDI
-midi_output_path = existing_file_path.replace('.musicxml', '.mid').replace('.xml', '.mid')
-score.write('midi', fp=midi_output_path)
-st.write(f"Converted MusicXML to MIDI: {midi_output_path}")
-
-# Display a download link for the MIDI file
-with open(midi_output_path, 'rb') as file:
-    btn = st.download_button(
-        label="Download MIDI",
-        data=file,
-        file_name=midi_output_path,
-        mime='audio/midi'
-    )
-score = m21.converter.parse(midi_output_path)
-st.write("MIDI file has been processed.")
-st.write(midi_output_path)
-st.audio(midi_output_path, format="audio/mid")
-# Convert MusicXML to MIDI
-
-import streamlit as st
-from midi2audio import FluidSynth
-import fluidsynth
-
-import os
-
-    # Ensure the soundfont path is correct
-soundfont_path = r"C:\Users\hp\Downloads\FluidR3_GM\FluidR3_GM.sf2"
-
-
-if os.path.exists(soundfont_path):
-        fs = FluidSynth(soundfont_path)
-        
-        # Convert MIDI to WAV
-        wav_output_path = midi_output_path.replace(".mid", ".wav").replace(".midi", ".wav")
-        st.write(midi_output_path)
-      
-        fs.midi_to_audio(midi_output_path, wav_output_path)
-        st.write(wav_output_path)
-        # Play the generated WAV file
-        with open(wav_output_path, "rb") as audio_file:
-            st.audio(audio_file.read(), format='audio/wav')
-
-        # Provide a download link for the WAV file
-        with open(wav_output_path, "rb") as file:
-            st.download_button(
-                label="Download WAV",
+        # Display a download link for the MIDI file
+        with open(midi_output_path, 'rb') as file:
+            btn = st.download_button(
+                label="Download MIDI",
                 data=file,
-                file_name=os.path.basename(wav_output_path),
-                mime="audio/wav"
+                file_name=os.path.basename(midi_output_path),
+                mime='audio/midi'
             )
         
-      
-else:
-        st.error("SoundFont file not found. Please ensure the path is correct.")
-def generate_sheet_image(midi_file_path):
-    midi_file_path = os.path.abspath(midi_file_path)
-    output_image_path = midi_file_path.rsplit('.', 1)[0] + '.png'
+        score = m21.converter.parse(midi_output_path)
+        st.write("MIDI file has been processed.")
+        st.write(midi_output_path)
+        st.audio(midi_output_path, format="audio/mid")
+
+        # Convert MusicXML to MIDI
+    soundfont_path = r"C:\Users\hp\Downloads\FluidR3_GM\FluidR3_GM.sf2"
+        
+
+# Check if the soundfont path exists
+    if os.path.exists(soundfont_path):
+    # Convert the MIDI output path to a WAV output path
+        wav_output_path = midi_output_path.replace(".mid", ".wav").replace(".midi", ".wav")
     
+    # Write paths to Streamlit interface
+        st.write("MIDI Path:", midi_output_path)
+        st.write("WAV Path:", wav_output_path)
+    
+    # Command to use FluidSynth from the command line
+    # '-ni': non-interactive mode, '-F': output file, '-T': output file type (wav)
+        cmd = ['fluidsynth', '-ni', soundfont_path, midi_output_path, '-F', wav_output_path]
+    
+            # Run the FluidSynth command using subprocess
+        try:
+            subprocess.run(cmd, check=True)
+            st.write(f"Conversion successful! WAV file saved to {wav_output_path}")
+        except subprocess.CalledProcessError as e:
+            st.write(f"Error during conversion: {e}")
 
-    # Run MuseScore to generate the image
-    result = subprocess.run(
-        [r'C:\Program Files\MuseScore 4\bin\MuseScore4.exe', midi_file_path, '-o', output_image_path],
-        capture_output=True, text=True
-    )
 
-    if result.returncode != 0:
-        st.error(f"MuseScore error: {result.stderr}")
+            # Provide a download link for the WAV file
+            with open(wav_output_path, "rb") as file:
+                st.download_button(
+                    label="Download WAV",
+                    data=file,
+                    file_name=os.path.basename(wav_output_path),
+                    mime="audio/wav"
+                )
+        else:
+            st.error("SoundFont file not found. Please ensure the path is correct.")
+
+        def generate_sheet_image(midi_output_path):
+            midi_output_path = os.path.abspath(midi_output_path)
+            output_image_path = midi_output_path.rsplit('.', 1)[0] + '.png'
+            
+            # Run MuseScore to generate the image
+            result = subprocess.run(
+                [r'C:\Program Files\MuseScore 4\bin\MuseScore4.exe', midi_output_path, '-o', output_image_path],
+                capture_output=True, text=True
+            )
+
+            if result.returncode != 0:  
+                st.error(f"MuseScore error: {result.stderr}")
+            else:
+                st.success("MuseScore ran successfully.")
+          
+            st.write(output_image_path)
+            return output_image_path
+
+        # Generate sheet music image
+        sheet_image_path = generate_sheet_image(midi_output_path)
+        if sheet_image_path and os.path.exists(sheet_image_path):
+            # Create a local URL-like path
+            sheet_image_path = sheet_image_path.replace("C:\\Users\hp\Documents\GitHub\jamescho\\uploads\\", "/uploads/")
+            st.image(sheet_image_path, caption='Generated Sheet Music', use_column_width=True)
+            st.write(f"Image can be accessed at: {sheet_image_path}")
+
+        # Display generated PNG files
+        uploads_dir = "uploads"
+        import glob
+        files = glob.glob(os.path.join(uploads_dir, os.path.basename(midi_output_path).replace(".mid", "*.png")))
+        for file in files:
+            st.image(file, caption=file, use_column_width=True)
+
     else:
-        st.success("MuseScore ran successfully.")
-  
-    
-    st.write(output_image_path)# Check if the image file was created
-    
+        st.error("Failed to process the uploaded file. Please try again with a different file.")
 
-    return None
-
-
-if midi_output_path is not None:
-    uploads_dir = 'uploads'
-    os.makedirs(uploads_dir, exist_ok=True)
-    saved_file_path = os.path.join(uploads_dir, midi_output_path.name)
-    with open(saved_file_path, 'wb') as f:
-        f.write(midi_output_path.getbuffer())
-
-    st.write(f"File saved at: {saved_file_path}")
-
-    # Generate sheet music image
-    sheet_image_path = generate_sheet_image(saved_file_path)
-    if sheet_image_path and os.path.exists(sheet_image_path):
-        # Create a local URL-like path
-        sheet_image_path = sheet_image_path.replace("C:\\Users\hp\Documents\GitHub\jamescho\\uploads\\", "/uploads/")
-        st.image(sheet_image_path, caption='Generated Sheet Music', use_column_width=True)
-        st.write(f"Image can be accessed at: {sheet_image_path}")
-
-        st.image(sheet_image_path, caption='Generated Sheet Music', use_column_width=True)
-import glob
-uploads_dir="uploads"
-
-files=glob.glob(uploads_dir+"/"+midi_output_path.name.replace(".mid","*.png"))
-for file in files:
-    st.image(file, caption=file, use_column_width=True)
+else:
+    st.info("Please upload a file to proceed.")
